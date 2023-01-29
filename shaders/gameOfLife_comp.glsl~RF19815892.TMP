@@ -1,0 +1,48 @@
+
+#version 450
+
+
+layout(set = 0, binding = 0) uniform gridRes {
+    int xres;
+    int yres;
+};
+
+layout(binding = 1) buffer InBuffer {
+    uint cells[];
+} inBuf;
+
+layout(binding = 2) buffer OutBuffer {
+    uint cells[];
+} outBuf;
+
+
+layout (local_size_x = 32, local_size_y = 32, local_size_z = 1) in;
+
+void main() {
+    int x = int(gl_GlobalInvocationID.x);
+    int y = int(gl_GlobalInvocationID.y);
+    // access the grid using xres and yres
+    int height = gridRes[0];
+    int width = gridRes[1];
+
+    uint liveCount = 0;
+    for (int i = -1; i <= 1; i++) {
+        for (int j = -1; j <= 1; j++) {
+            if (i == 0 && j == 0) continue;
+            int xi = mod(x + i, height);
+            int yj = mod(y + j, width);;
+            liveCount += inBuf.cells[xi + yj * width];
+        }
+    }
+    
+
+
+     // Apply the Game of Life rules to the current cell
+    uint currentCell = inBuf.cells[x + y * width];
+    uint result = 0;
+    if (liveCount > 1) result = currentCell;
+    if (liveCount == 3) result = 1;
+    if (liveCount >= 4) result = 0;
+    result = outBuf.cells[x + y * width] = result;
+   
+}

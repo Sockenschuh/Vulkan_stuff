@@ -1,0 +1,163 @@
+#include "vulkan_base.h"
+
+VkShaderModule createShaderModule2(VulkanContext* context, const char* shaderFilename) {
+    VkShaderModule result = {};
+
+    // Read shader file
+    FILE* file = fopen(shaderFilename, "rb");
+    if (!file) {
+        LOG_ERROR("Shader not found: ", shaderFilename);
+        return result;
+    }
+    fseek(file, 0, SEEK_END);
+    long fileSize = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    assert((fileSize & 0x03) == 0);
+    uint8_t* buffer = new uint8_t[fileSize];
+    fread(buffer, 1, fileSize, file);
+
+    VkShaderModuleCreateInfo createInfo = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+    createInfo.codeSize = fileSize;
+    createInfo.pCode = (uint32_t*)buffer;
+    VKA(vkCreateShaderModule(context->device, &createInfo, 0, &result));
+
+    delete[] buffer;
+    fclose(file);
+
+    return result;
+}
+
+
+
+VkPipeline createComputePipeline(VulkanContext* context,
+    const char* computeShaderFilename,
+    VkDescriptorBufferInfo* bufferInfos,
+    VkPipelineCreateFlags flags,
+    VkSpecializationInfo* specializationInfo) {
+
+    VkPipeline pipeline;
+
+    VkDescriptorPool descriptorPool;
+
+    // Set up the descriptor pool size
+    VkDescriptorPoolSize poolSize;
+    poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    poolSize.descriptorCount = 2;
+
+
+    // Create the descriptor pool create info
+    VkDescriptorPoolCreateInfo poolInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+    poolInfo.poolSizeCount = 1;
+    poolInfo.pPoolSizes = &poolSize;
+    poolInfo.maxSets = 2;
+
+    // Create the descriptor pool
+    VKA(vkCreateDescriptorPool(context->device, &poolInfo, nullptr, &descriptorPool));
+
+    VkDescriptorSetLayoutBinding layoutBindings[2];
+    layoutBindings[0].binding = 0;
+    layoutBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    layoutBindings[0].descriptorCount = 1;
+    layoutBindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    layoutBindings[1].binding = 1;
+    layoutBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    layoutBindings[1].descriptorCount = 1;
+    layoutBindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    VkDescriptorSetLayoutCreateInfo layoutCreateInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+    layoutCreateInfo.bindingCount = 2;
+    layoutCreateInfo.pBindings = layoutBindings;
+
+    VkDescriptorSetLayout descriptorSetLayout;
+    vkCreateDescriptorSetLayout(context->device, &layoutCreateInfo, 0, &descriptorSetLayout);
+
+
+    // create a descriptor set
+    VkDescriptorSet descriptorSet;
+    VkDescriptorSetAllocateInfo descriptorSetAllocateInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+    descriptorSetAllocateInfo.descriptorPool = descriptorPool;
+    descriptorSetAllocateInfo.descriptorSetCount = 1;
+    descriptorSetAllocateInfo.pSetLayouts = &descriptorSetLayout;
+    VKA(vkAllocateDescriptorSets(context->device, &descriptorSetAllocateInfo, &descriptorSet));
+
+    VkWriteDescriptorSet descriptorWrites[2];
+    descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    descriptorWrites[0].dstSet = descriptorSet;
+    descriptorWrites[0].dstBinding = 0;
+    descriptorWrites[0].dstArrayElement = 0;
+    descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    descriptorWrites[0].descriptorCount = 1;
+    descriptorWrites[0].pBufferInfo = &bufferInfos[0];
+
+    descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    descriptorWrites[1].dstSet = descriptorSet;
+    descriptorWrites[1].dstBinding = 1;
+    descriptorWrites[1].dstArrayElement = 0;
+    descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    descriptorWrites[1].descriptorCount = 1;
+    descriptorWrites[1].pBufferInfo = &bufferInfos[1];
+
+    if (descriptorSet == VK_NULL_HANDLE || bufferInfos[0].buffer == VK_NULL_HANDLE || bufferInfos[1].buffer == VK_NULL_HANDLE) {
+        LOG_ERROR("// Handle error, one of the descriptorSet, bufferInfos[0] and bufferInfos[1] is not initialized");
+    }
+    else if (descriptorWrites[0].descriptorCount != 1 || descriptorWrites[1].descriptorCount != 1) {
+        LOG_ERROR("// Handle error, descriptor count is not 1");
+    }
+    else if (descriptorWrites[0].descriptorType != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER || descriptorWrites[1].descriptorType != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER) {
+        LOG_ERROR("// Handle error, descriptor type is not VK_DESCRIPTOR_TYPE_STORAGE_BUFFER");
+    }
+    else if (descriptorWrites[0].dstArrayElement != 0 || descriptorWrites[1].dstArrayElement != 0) {
+        LOG_ERROR("// Handle error, dstArrayElement is not 0");
+    }
+    else if (descriptorWrites[0].dstBinding != 0 || descriptorWrites[1].dstBinding != 1) {
+        LOG_ERROR("// Handle error, dstBinding does not match the descriptor set layout");
+    }
+    else if (descriptorWrites[0].dstSet != descriptorSet || descriptorWrites[1].dstSet != descriptorSet) {
+        LOG_ERROR("Handle error, dstSet does not match the descriptor set");
+    }
+    else {
+        LOG_INFO("everything ok");
+    }
+
+    VK(vkUpdateDescriptorSets(context->device, 2, descriptorWrites, 0, 0));
+
+    LOG_INFO("awpodij");
+
+    // Create the compute shader module
+    VkShaderModule computeShaderModule = createShaderModule2(context, computeShaderFilename);
+
+
+    // Create the compute pipeline stage
+    VkPipelineShaderStageCreateInfo computeShaderStage = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+    computeShaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    computeShaderStage.module = computeShaderModule;
+    computeShaderStage.pName = "main";
+    computeShaderStage.pSpecializationInfo = specializationInfo;
+
+
+    // create pipelineLayout
+    VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = {};
+    pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutCreateInfo.setLayoutCount = 1;
+    pipelineLayoutCreateInfo.pSetLayouts = &descriptorSetLayout;
+
+
+    VkPipelineLayout pipelineLayout;
+    vkCreatePipelineLayout(context->device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout);
+
+
+
+    // Create the compute pipeline create info
+    VkComputePipelineCreateInfo pipelineCreateInfo = { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+    pipelineCreateInfo.stage = computeShaderStage;
+    pipelineCreateInfo.layout = pipelineLayout;
+    pipelineCreateInfo.flags = flags;
+
+    // Create the compute pipeline
+    VKA(vkCreateComputePipelines(context->device, VK_NULL_HANDLE, 1, &pipelineCreateInfo, nullptr, &pipeline));
+
+    return pipeline;
+}
+
+void destroyCompPipeline(VulkanContext* context, VkPipeline* pipeline) {
+    VK(vkDestroyPipeline(context->device, *pipeline, 0));
+}
