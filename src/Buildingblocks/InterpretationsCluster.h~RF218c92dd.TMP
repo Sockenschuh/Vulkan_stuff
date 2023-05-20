@@ -1,0 +1,18 @@
+#include <vector>
+
+class SensorGruppe;
+
+class InterpretationsCluster
+{
+public:
+	int wertigkeit;
+	int groesse;
+	std::vector<int> SensorGruppenIDs;
+	std::vector<std::vector<int>> ClusterDNAs;
+
+	std::vector<SensorGruppe*> UsedGroups;
+
+	bool square;
+
+	InterpretationsCluster(std::vector<SensorGruppe*> SensorGruppen, std::vector<int> toUseIDs, bool square);
+};

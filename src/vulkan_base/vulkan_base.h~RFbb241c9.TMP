@@ -27,34 +27,28 @@ struct cellData {
 	uint32_t delay;
 };
 
-
 struct InputData {
-	int Xres;          // 0 4 bytes
-	int Yres;          // 1 4 bytes
-	int Wish;          // 2 4 bytes
-	int Stay;          // 3 4 bytes
-	int maxCombiSum;	// 4 4 bytes
-	int anzahlCluster;	// 5 4 bytes
-	int thisSpecies;	// 6 4 bytes
-	int stateGroups;	// 7 4 bytes
-	int testint;		// 8 4 bytes	
-	float factorPart;	// 9 4 bytes	
-	int pad_0;
-	int pad_1;
-	int BodyDNA[96];	// 10 4 bytes	
-	int RulesDNA[4];   // 11 16 bytes
-	int padding_0[2]; // 8 bytes padding
-	int sensorGruppenAnzahl[6]; // 24 bytes
-	int SensorGruppenIDs[96]; // 384 bytes
+	int Xres;
+	int Yres;
+	int RulesDNA[3];
+	int BodyDNA[96];
+	int sensorGruppenAnzahl[6];
+	int Wish;
+	int Stay;
+	int maxCombiSum;
+	int SensorGruppenIDs[96];
+	int anzahlCluster;
 	int Wertigkeiten[6];
+	int thisSpecies;
+	bool square;
+	int stateGroups;
+	bool sumTest;
+	int testint;
 	int speciesRetardValues[18];
 	int speciesThresh[18];
 	int speciesAcc[18];
-	bool square;
-	bool sumTest;
+	float factorPart;
 };
-
-
 
 struct VulkanQueue {
 	VkQueue queue;
@@ -82,12 +76,8 @@ struct VulkanPipeline {
 	VkDescriptorPool descriptorPool;
 	VkDescriptorSetLayout descriptorSetLayout;
 	VkDescriptorSet* descriptorSets;
+	frameSetGroup* descriptorSetsGroups;
 	VkDescriptorSetLayoutCreateInfo layoutCreateInfo;
-	
-	VkDescriptorPool uniformsDescriptorPool;
-	VkDescriptorSetLayout uniformsDescriptorSetLayout;
-	VkDescriptorSet* uniformsDescriptorSets;
-	VkDescriptorSetLayoutCreateInfo uniformsLayoutCreateInfo;
 };
 
 struct VulkanContext {

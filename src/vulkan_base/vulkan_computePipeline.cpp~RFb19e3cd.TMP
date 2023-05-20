@@ -60,6 +60,14 @@ VulkanPipeline createComputePipeline(VulkanContext* context,
     uniformsPoolInfo.maxSets = numDescriptorSets;
 
 
+    VkDescriptorPool uniformDescriptorPool;
+    // Create the descriptor pool
+    if (amountExtraSingleUniformsPerSet != 0) {
+        if (vkCreateDescriptorPool(context->device, &uniformsPoolInfo, nullptr, &uniformDescriptorPool) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create descriptor pool!");
+        }
+    }
+
     VkDescriptorPool uniformsDescriptorPool;
     // Create the descriptor pool
 
@@ -100,9 +108,9 @@ VulkanPipeline createComputePipeline(VulkanContext* context,
 
         uniformsLayout = uniformsDescriptorSetLayout;
 
-        std::vector<VkDescriptorSetLayout> uniformsLayouts(numDescriptorSets, uniformsLayout);
+        std::vector<VkDescriptorSetLayout> uniformsLayouts(amountExtraSingleUniformsPerSet, uniformsLayout);
         uniformsDescriptorSetAllocateInfo.descriptorPool = uniformsDescriptorPool;
-        uniformsDescriptorSetAllocateInfo.descriptorSetCount = numDescriptorSets;
+        uniformsDescriptorSetAllocateInfo.descriptorSetCount = amountExtraSingleUniformsPerSet;
         uniformsDescriptorSetAllocateInfo.pSetLayouts = uniformsLayouts.data();
 
         if (vkAllocateDescriptorSets(context->device, &uniformsDescriptorSetAllocateInfo, uniformsDescriptorSets) != VK_SUCCESS) {
@@ -116,7 +124,7 @@ VulkanPipeline createComputePipeline(VulkanContext* context,
         //ToDo: nicht alle brauchen einen Swap-buffer. Swaps ist nicht immer descriptorSetSize. meistens eigentlich 2
         for (uint32_t i = 0; i < numDescriptorSets; i++)
         {
-            uint32_t uniformsDescriptorSetSizeTotal = (amountExtraSingleUniformsPerSet);
+            uint32_t uniformsDescriptorSetSizeTotal = (descriptorSetSize_1 + descriptorSetSize_2 + amountExtraSingleStoragesPerSet + amountExtraSingleUniformsPerSet);
 
             for (size_t j = 0; j < amountExtraSingleUniformsPerSet; j++)
             {
@@ -308,8 +316,7 @@ VulkanPipeline createComputePipeline(VulkanContext* context,
     // Create the compute pipeline
     VKA(vkCreateComputePipelines(context->device, VK_NULL_HANDLE, 1, &pipelineCreateInfo, nullptr, &pipeline));
 
-   
-
+    
     VK(vkDestroyShaderModule(context->device, computeShaderModule, 0));
 
     VulkanPipeline computePipeline;
@@ -319,16 +326,6 @@ VulkanPipeline createComputePipeline(VulkanContext* context,
     computePipeline.descriptorSetLayout = descriptorSetLayout;
     computePipeline.descriptorPool = descriptorPool;
     computePipeline.layoutCreateInfo = layoutCreateInfo;
-    computePipeline.uniformsDescriptorSets = NULL;
-    computePipeline.uniformsDescriptorPool = NULL;
-    computePipeline.uniformsDescriptorSetLayout = NULL;
-
-    if (amountExtraSingleUniformsPerSet != 0) {
-        computePipeline.uniformsDescriptorSets = uniformsDescriptorSets;
-        computePipeline.uniformsDescriptorPool = uniformsDescriptorPool;
-        computePipeline.uniformsDescriptorSetLayout = uniformsDescriptorSetLayout;
-        computePipeline.uniformsLayoutCreateInfo = uniformsLayoutCreateInfo;
-    }
 
     return computePipeline;
 }
@@ -339,14 +336,6 @@ void destroyComputePipeline(VulkanContext* context, VulkanPipeline* pipeline) {
     VK(vkDestroyDescriptorPool(context->device, pipeline->descriptorPool, 0));
     VK(vkDestroyDescriptorSetLayout(context->device, pipeline->descriptorSetLayout, 0));
     
-    if (pipeline->uniformsDescriptorPool != NULL) {
-        VK(vkDestroyDescriptorPool(context->device, pipeline->uniformsDescriptorPool, 0));
-        VK(vkDestroyDescriptorSetLayout(context->device, pipeline->uniformsDescriptorSetLayout, 0));
-        delete[] pipeline->uniformsDescriptorSets;
-
-    }
-    
-
     delete[] pipeline->descriptorSets;
     delete[] pipeline->layoutCreateInfo.pBindings;
 }

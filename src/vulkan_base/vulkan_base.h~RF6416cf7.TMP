@@ -20,6 +20,7 @@ struct calcData {
 };
 
 struct cellData {
+	uint32_t living;
 	uint32_t command;
 	uint32_t species;
 	uint32_t state;
@@ -27,34 +28,28 @@ struct cellData {
 	uint32_t delay;
 };
 
-
 struct InputData {
-	int Xres;          // 0 4 bytes
-	int Yres;          // 1 4 bytes
-	int Wish;          // 2 4 bytes
-	int Stay;          // 3 4 bytes
-	int maxCombiSum;	// 4 4 bytes
-	int anzahlCluster;	// 5 4 bytes
-	int thisSpecies;	// 6 4 bytes
-	int stateGroups;	// 7 4 bytes
-	int testint;		// 8 4 bytes	
-	float factorPart;	// 9 4 bytes	
-	int pad_0;
-	int pad_1;
-	int BodyDNA[96];	// 10 4 bytes	
-	int RulesDNA[4];   // 11 16 bytes
-	int padding_0[2]; // 8 bytes padding
-	int sensorGruppenAnzahl[6]; // 24 bytes
-	int SensorGruppenIDs[96]; // 384 bytes
+	int Xres;
+	int Yres;
+	int RulesDNA[3];
+	int BodyDNA[96];
+	int sensorGruppenAnzahl[6];
+	int Wish;
+	int Stay;
+	int maxCombiSum;
+	int SensorGruppenIDs[96];
+	int anzahlCluster;
 	int Wertigkeiten[6];
+	int thisSpecies;
+	bool square;
+	int stateGroups;
+	bool sumTest;
+	int testint;
 	int speciesRetardValues[18];
 	int speciesThresh[18];
 	int speciesAcc[18];
-	bool square;
-	bool sumTest;
+	float factorPart;
 };
-
-
 
 struct VulkanQueue {
 	VkQueue queue;
@@ -70,12 +65,6 @@ struct VulkanSwapchain {
 	std::vector<VkImageView> imageViews;
 };
 
-struct frameSetGroup {
-	VkDescriptorSet storageSet;
-	VkDescriptorSet uniformSet;
-	VkDescriptorSet* arr;
-};
-
 struct VulkanPipeline {
 	VkPipeline pipeline;
 	VkPipelineLayout pipelineLayout;
@@ -83,11 +72,6 @@ struct VulkanPipeline {
 	VkDescriptorSetLayout descriptorSetLayout;
 	VkDescriptorSet* descriptorSets;
 	VkDescriptorSetLayoutCreateInfo layoutCreateInfo;
-	
-	VkDescriptorPool uniformsDescriptorPool;
-	VkDescriptorSetLayout uniformsDescriptorSetLayout;
-	VkDescriptorSet* uniformsDescriptorSets;
-	VkDescriptorSetLayoutCreateInfo uniformsLayoutCreateInfo;
 };
 
 struct VulkanContext {
@@ -116,8 +100,8 @@ VkRenderPass createRenderPass(VulkanContext* context, VkFormat format);
 void destroyRenderpass(VulkanContext* context, VkRenderPass renderPass);
 
 void createBuffer(VulkanContext* context, VulkanBuffer* buffer, uint64_t size, VkBufferUsageFlags usage, VkMemoryPropertyFlags memoryProperties);
-void uploadDataToBuffer(VulkanContext* context, VulkanBuffer* dst_buffer, void* data, size_t size, VulkanBuffer* src_buffer = nullptr);
-	void destroyBuffer(VulkanContext* context, VulkanBuffer* buffer);
+void uploadDataToBuffer(VulkanContext* context, VulkanBuffer* buffer, void* data, size_t size);
+void destroyBuffer(VulkanContext* context, VulkanBuffer* buffer);
 
 VulkanPipeline createGraphicsPipeline(VulkanContext* context,
 	const char* vertexShaderFilename,
@@ -146,9 +130,7 @@ VulkanPipeline createComputePipeline(VulkanContext* context,
 	VkPipelineCreateFlags flags,
 	VkSpecializationInfo* specializationInfo,
 	uint32_t amountExtraSingleStoragesPerSet,
-	VkDescriptorBufferInfo* extraSingleBufferInfos,
-	uint32_t amountExtraSingleUniformsPerSet,
-	VkDescriptorBufferInfo* extraSingleUniformBufferInfos);
+	VkDescriptorBufferInfo* extraSingleBufferInfos);
 
 void destroyComputePipeline(VulkanContext* context, VulkanPipeline* pipeline);
 

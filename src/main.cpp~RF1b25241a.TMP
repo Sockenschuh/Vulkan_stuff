@@ -17,7 +17,7 @@ std::mt19937 randomEngine(std::random_device{}());
 std::uniform_int_distribution<uint32_t> distribution(0, 1);
 
 
-#define FRAMES_IN_FLIGHT 32
+#define FRAMES_IN_FLIGHT 4
 #define computeDescriptorSetSize 2
 //#define VULKAN_TIME_PROFILE
 
@@ -45,6 +45,10 @@ VulkanBuffer indexBuffer;
 
 VulkanBuffer cellStateBuffers[FRAMES_IN_FLIGHT];
 VulkanBuffer cellDataBuffers[FRAMES_IN_FLIGHT];
+
+VulkanBuffer cellStateUniformBuffers[FRAMES_IN_FLIGHT];
+VulkanBuffer cellDataUniformsBuffers[FRAMES_IN_FLIGHT]
+
 VulkanBuffer globalGpuDataBuffer;
 VulkanBuffer globalGpuDataUniformBuffer;
 VulkanBuffer preCalcBuffer;
@@ -57,6 +61,10 @@ VkCommandPool initialCellStateCommandBufferPool;
 
 VkDescriptorBufferInfo cellStateBufferInfos[FRAMES_IN_FLIGHT];
 VkDescriptorBufferInfo cellDataBufferInfos[FRAMES_IN_FLIGHT];
+
+VkDescriptorBufferInfo cellStateUniformBufferInfos[FRAMES_IN_FLIGHT];
+VkDescriptorBufferInfo cellDataUniformBufferInfos[FRAMES_IN_FLIGHT];
+
 VkDescriptorBufferInfo preCalcBufferInfo;
 VkDescriptorBufferInfo preCalcKernelBufferInfo;
 VkDescriptorBufferInfo preCalcKernelUniformBufferInfo;
@@ -85,10 +93,10 @@ InputData globalGpuData;
 int sensorSetSize = 16;
 int clusterSetSize = 3;
 int minimumDist = 0;
-int maximumDist = 6;
+int maximumDist = 50;
 int maximumNeurons = 20;
 int maximumSensors = 3;
-int maximumClusters = 2;
+int maximumClusters = 3;
 int maximumSpec = 1;
 bool squareio = false;
 int minWishPercent = 0;
@@ -96,8 +104,8 @@ int maxWishPercent = 5000;
 int minStayPercent = 0;
 int maxStayPercent = 5000;
 
-const uint32_t Xres = 32 * 32*1;
-const uint32_t Yres = 32 * 32*1;
+const uint32_t Xres = 32 * 24*1;
+const uint32_t Yres = 32 * 24*1;
 uint32_t cellStateBufferSize = 2 * Xres * Yres * sizeof(uint32_t);
 uint32_t cellDataBufferSize = Xres * Yres * sizeof(cellData);
 uint32_t initialData[2*Xres * Yres];
@@ -959,6 +967,10 @@ void renderApplication() {
 	//dispatch shader
 	//vkCmdDispatch(computeCommandBuffer, Xres, Yres, 1); //assuming Xres*Yres is not exceeding maxWorkgroups of device and dimensions are devisible by localgroups
 	vkCmdDispatch(computeCommandBuffer, (Xres + 31) / 32, (Yres + 31) / 32, 1);
+
+
+	VkBufferCopy region = { 0, 0, size };
+	VK(vkCmdCopyBuffer(computeCommandBuffer, stagingBuffer.buffer, dst_buffer->buffer, 1, &region));
 
 
 	//end recording

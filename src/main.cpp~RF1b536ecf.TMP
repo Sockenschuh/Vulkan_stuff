@@ -17,7 +17,7 @@ std::mt19937 randomEngine(std::random_device{}());
 std::uniform_int_distribution<uint32_t> distribution(0, 1);
 
 
-#define FRAMES_IN_FLIGHT 32
+#define FRAMES_IN_FLIGHT 4
 #define computeDescriptorSetSize 2
 //#define VULKAN_TIME_PROFILE
 
@@ -45,6 +45,10 @@ VulkanBuffer indexBuffer;
 
 VulkanBuffer cellStateBuffers[FRAMES_IN_FLIGHT];
 VulkanBuffer cellDataBuffers[FRAMES_IN_FLIGHT];
+
+VulkanBuffer cellStateUniformBuffers[FRAMES_IN_FLIGHT];
+VulkanBuffer cellDataUniformBuffers[FRAMES_IN_FLIGHT];
+
 VulkanBuffer globalGpuDataBuffer;
 VulkanBuffer globalGpuDataUniformBuffer;
 VulkanBuffer preCalcBuffer;
@@ -57,6 +61,10 @@ VkCommandPool initialCellStateCommandBufferPool;
 
 VkDescriptorBufferInfo cellStateBufferInfos[FRAMES_IN_FLIGHT];
 VkDescriptorBufferInfo cellDataBufferInfos[FRAMES_IN_FLIGHT];
+
+VkDescriptorBufferInfo cellStateUniformBufferInfos[FRAMES_IN_FLIGHT];
+VkDescriptorBufferInfo cellDataUniformBufferInfos[FRAMES_IN_FLIGHT];
+
 VkDescriptorBufferInfo preCalcBufferInfo;
 VkDescriptorBufferInfo preCalcKernelBufferInfo;
 VkDescriptorBufferInfo preCalcKernelUniformBufferInfo;
@@ -85,10 +93,10 @@ InputData globalGpuData;
 int sensorSetSize = 16;
 int clusterSetSize = 3;
 int minimumDist = 0;
-int maximumDist = 6;
+int maximumDist = 50;
 int maximumNeurons = 20;
 int maximumSensors = 3;
-int maximumClusters = 2;
+int maximumClusters = 3;
 int maximumSpec = 1;
 bool squareio = false;
 int minWishPercent = 0;
@@ -96,8 +104,8 @@ int maxWishPercent = 5000;
 int minStayPercent = 0;
 int maxStayPercent = 5000;
 
-const uint32_t Xres = 32 * 32*1;
-const uint32_t Yres = 32 * 32*1;
+const uint32_t Xres = 32 * 24*1;
+const uint32_t Yres = 32 * 24*1;
 uint32_t cellStateBufferSize = 2 * Xres * Yres * sizeof(uint32_t);
 uint32_t cellDataBufferSize = Xres * Yres * sizeof(cellData);
 uint32_t initialData[2*Xres * Yres];
@@ -333,7 +341,7 @@ void initGameLogic() {
 void preCalc() {
 
 	{
-		preCalcPipeline = createComputePipeline(context, "../shaders/preCalc_comp.spv", 0, 0, 1, 0, 0, 0, 0, 0, 1, &preCalcBufferInfo, 0, 0);
+		preCalcPipeline = createComputePipeline(context, "../shaders/preCalc_comp.spv", 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, &preCalcBufferInfo, 0, 0);
 
 
 		VkCommandPoolCreateInfo createInfo = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
@@ -398,7 +406,7 @@ void preCalc() {
 		std::vector< VkDescriptorBufferInfo> singleBuffers = { preCalcBufferInfo, globalGpuDataBufferInfo, preCalcKernelBufferInfo };
 		std::vector< VkDescriptorBufferInfo>  singleUniforms = {};
 
-		preCalcKernelPipeline = createComputePipeline(context, "../shaders/preCalc_Kernel.spv", 0, 0, 1, 0, 0, 0, 0, 0, singleBuffers.size(), singleBuffers.data(), singleUniforms.size(), singleUniforms.data());
+		preCalcKernelPipeline = createComputePipeline(context, "../shaders/preCalc_Kernel.spv", 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, singleBuffers.size(), singleBuffers.data(), singleUniforms.size(), singleUniforms.data());
 
 
 		VkCommandPoolCreateInfo createInfo = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
@@ -463,10 +471,20 @@ void initComputationBuffers() {
 	uint32_t offset = 0;
 	for (uint32_t i = 0; i < ARRAY_COUNT(cellDataBuffers); i++) {
 		cellDataBuffers[i].offset = offset;
-		createBuffer(context, &cellDataBuffers[i], Xres * Yres * sizeof(cellData), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT); //VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+		createBuffer(context, &cellDataBuffers[i], Xres * Yres * sizeof(cellData), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT); //VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 		cellDataBufferInfos[i].buffer = cellDataBuffers[i].buffer;
 		cellDataBufferInfos[i].offset = 0;
 		cellDataBufferInfos[i].range = cellDataBufferSize;
+		offset += cellDataBufferSize;
+	}
+
+	offset = 0;
+	for (uint32_t i = 0; i < ARRAY_COUNT(cellDataUniformBuffers); i++) {
+		cellDataUniformBuffers[i].offset = offset;
+		createBuffer(context, &cellDataUniformBuffers[i], Xres * Yres * sizeof(cellData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT); //VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+		cellDataUniformBufferInfos[i].buffer = cellDataUniformBuffers[i].buffer;
+		cellDataUniformBufferInfos[i].offset = 0;
+		cellDataUniformBufferInfos[i].range = cellDataBufferSize;
 		offset += cellDataBufferSize;
 	}
 
@@ -689,7 +707,7 @@ void initCompute() {
 	std::vector< VkDescriptorBufferInfo> singleBuffers = { preCalcBufferInfo, /*globalGpuDataBufferInfo*/};
 	std::vector< VkDescriptorBufferInfo>  singleUniforms = {  preCalcKernelUniformBufferInfo, globalGpuDataUniformBufferInfo };
 
-	computePipeline = createComputePipeline(context, "../shaders/cellSimulation_comp.spv", cellStateBufferInfos, cellDataBufferInfos, FRAMES_IN_FLIGHT, computeDescriptorSetSize,2, sizeof(PushData), 0, 0, singleBuffers.size(), singleBuffers.data(), singleUniforms.size(), singleUniforms.data());
+	computePipeline = createComputePipeline(context, "../shaders/cellSimulation_comp.spv", cellStateBufferInfos, cellDataBufferInfos, cellStateUniformBufferInfos, cellDataUniformBufferInfos, FRAMES_IN_FLIGHT, computeDescriptorSetSize,2, sizeof(PushData), 0, 0, singleBuffers.size(), singleBuffers.data(), singleUniforms.size(), singleUniforms.data());
 
 	for (uint32_t i = 0; i < ARRAY_COUNT(computeCommandPools); ++i) {
 		VkCommandPoolCreateInfo createInfo = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
@@ -733,13 +751,23 @@ void initApplication(SDL_Window* window) {
 	uint32_t offset = 0;
 	for (uint32_t i = 0; i < ARRAY_COUNT(cellStateBuffers); i++) {
 		cellStateBuffers[i].offset = offset;
-		createBuffer(context, &cellStateBuffers[i], cellStateBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT); //VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+		createBuffer(context, &cellStateBuffers[i], cellStateBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT); //VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 		cellStateBufferInfos[i].buffer = cellStateBuffers[i].buffer;
 		cellStateBufferInfos[i].offset = 0;
 		cellStateBufferInfos[i].range = cellStateBufferSize;
 		offset += cellStateBufferSize;
 	}
 
+	//create internal uniform buffers
+	offset = 0;
+	for (uint32_t i = 0; i < ARRAY_COUNT(cellStateUniformBuffers); i++) {
+		cellStateUniformBuffers[i].offset = offset;
+		createBuffer(context, &cellStateUniformBuffers[i], cellStateBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT); //VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+		cellStateUniformBufferInfos[i].buffer = cellStateUniformBuffers[i].buffer;
+		cellStateUniformBufferInfos[i].offset = 0;
+		cellStateUniformBufferInfos[i].range = cellStateBufferSize;
+		offset += cellStateBufferSize;
+	}
 
 	
 	VkVertexInputAttributeDescription vertexAttributeDescriptions[2] = {};
@@ -961,6 +989,13 @@ void renderApplication() {
 	vkCmdDispatch(computeCommandBuffer, (Xres + 31) / 32, (Yres + 31) / 32, 1);
 
 
+	VkBufferCopy region = { 0, 0, cellDataBufferSize};
+	VK(vkCmdCopyBuffer(computeCommandBuffer, cellDataBuffers[frameIndex].buffer, cellDataUniformBuffers[frameIndex].buffer, 1, &region));
+
+	region = { 0, 0, cellStateBufferSize};
+	VK(vkCmdCopyBuffer(computeCommandBuffer, cellStateBuffers[frameIndex].buffer, cellStateUniformBuffers[frameIndex].buffer, 1, &region));
+
+
 	//end recording
 	vkEndCommandBuffer(computeCommandBuffer);	
 
@@ -1076,6 +1111,8 @@ void shutdownApplication() {
 	{
 		destroyBuffer(context, &cellStateBuffers[i]);
 		destroyBuffer(context, &cellDataBuffers[i]);
+		destroyBuffer(context, &cellStateUniformBuffers[i]);
+		destroyBuffer(context, &cellDataUniformBuffers[i]);
 	}
 
 

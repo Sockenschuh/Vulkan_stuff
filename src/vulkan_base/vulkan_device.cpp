@@ -64,7 +64,7 @@ bool initVulkanInstance(VulkanContext* context, uint32_t instanceExtensionCount,
 	VkApplicationInfo applicationInfo = { VK_STRUCTURE_TYPE_APPLICATION_INFO };
 	applicationInfo.pApplicationName = "Vulkan Tutorial";
 	applicationInfo.applicationVersion = VK_MAKE_VERSION(0, 0, 1); // 0.0.1
-	applicationInfo.apiVersion = VK_API_VERSION_1_0;
+	applicationInfo.apiVersion = VK_API_VERSION_1_2;
 
 	VkInstanceCreateInfo createInfo = { VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
 	createInfo.pNext = &validationFeatures;
@@ -156,13 +156,25 @@ bool createLogicalDevice(VulkanContext* context, uint32_t deviceExtensionCount, 
 		queueCreateInfo.pQueuePriorities = priorities;
 
 		VkPhysicalDeviceFeatures enabledFeatures = {};
+		
+		VkPhysicalDeviceFeatures2 deviceFeatures2 = {};
+		deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+
+		VkPhysicalDeviceScalarBlockLayoutFeaturesEXT scalarBlockLayoutFeatures = {};
+		scalarBlockLayoutFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES_EXT;
+		scalarBlockLayoutFeatures.scalarBlockLayout = VK_TRUE;
+
+		deviceFeatures2.pNext = &scalarBlockLayoutFeatures;
+
+		vkGetPhysicalDeviceFeatures2(context->physicalDevice, &deviceFeatures2);
 
 		VkDeviceCreateInfo createInfo = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
 		createInfo.queueCreateInfoCount = 1;
 		createInfo.pQueueCreateInfos = &queueCreateInfo;
 		createInfo.enabledExtensionCount = deviceExtensionCount;
 		createInfo.ppEnabledExtensionNames = deviceExtensions;
-		createInfo.pEnabledFeatures = &enabledFeatures;
+		//createInfo.pEnabledFeatures = &enabledFeatures;
+		createInfo.pNext = &deviceFeatures2;
 
 		if (vkCreateDevice(context->physicalDevice, &createInfo, 0, &context->device)) {
 			LOG_ERROR("Failed to create vulkan logical device");

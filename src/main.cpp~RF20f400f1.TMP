@@ -9,15 +9,11 @@
 #include <chrono>
 #include <iostream>
 
-
-#include "Buildingblocks/Buildingblocks.h"
-
-
 std::mt19937 randomEngine(std::random_device{}());
 std::uniform_int_distribution<uint32_t> distribution(0, 1);
 
 
-#define FRAMES_IN_FLIGHT 32
+#define FRAMES_IN_FLIGHT 4
 #define computeDescriptorSetSize 2
 //#define VULKAN_TIME_PROFILE
 
@@ -44,29 +40,18 @@ VulkanBuffer indexBuffer;
 
 
 VulkanBuffer cellStateBuffers[FRAMES_IN_FLIGHT];
-VulkanBuffer cellDataBuffers[FRAMES_IN_FLIGHT];
 VulkanBuffer globalGpuDataBuffer;
-VulkanBuffer globalGpuDataUniformBuffer;
 VulkanBuffer preCalcBuffer;
-VulkanBuffer preCalcKernelBuffer;
-VulkanBuffer preCalcKernelUniformBuffer;
 
 VulkanBuffer initialCellStateBuffer;
 VkCommandBuffer initialCellStateCommandBuffer;
 VkCommandPool initialCellStateCommandBufferPool;
 
-VkDescriptorBufferInfo cellStateBufferInfos[FRAMES_IN_FLIGHT];
-VkDescriptorBufferInfo cellDataBufferInfos[FRAMES_IN_FLIGHT];
+VkDescriptorBufferInfo bufferInfos[FRAMES_IN_FLIGHT];
 VkDescriptorBufferInfo preCalcBufferInfo;
-VkDescriptorBufferInfo preCalcKernelBufferInfo;
-VkDescriptorBufferInfo preCalcKernelUniformBufferInfo;
 VkDescriptorBufferInfo globalGpuDataBufferInfo;
-VkDescriptorBufferInfo globalGpuDataUniformBufferInfo;
-
-
 VulkanPipeline computePipeline;
 VulkanPipeline preCalcPipeline;
-VulkanPipeline preCalcKernelPipeline;
 
 VkCommandBuffer computeCommandBuffers[FRAMES_IN_FLIGHT];
 VkCommandPool computeCommandPools[FRAMES_IN_FLIGHT];
@@ -74,33 +59,12 @@ VkCommandPool computeCommandPools[FRAMES_IN_FLIGHT];
 
 VkCommandBuffer preCalcCommandBuffer;
 VkCommandPool preCalcCommandPool;
-VkCommandBuffer preCalcKernelCommandBuffer;
-VkCommandPool preCalcKernelCommandPool;
 
 
-Buildingblocks* builder = new Buildingblocks();
-InputData globalGpuData;
-
-
-int sensorSetSize = 16;
-int clusterSetSize = 3;
-int minimumDist = 0;
-int maximumDist = 6;
-int maximumNeurons = 20;
-int maximumSensors = 3;
-int maximumClusters = 2;
-int maximumSpec = 1;
-bool squareio = false;
-int minWishPercent = 0;
-int maxWishPercent = 5000;
-int minStayPercent = 0;
-int maxStayPercent = 5000;
-
-const uint32_t Xres = 32 * 32*1;
-const uint32_t Yres = 32 * 32*1;
-uint32_t cellStateBufferSize = 2 * Xres * Yres * sizeof(uint32_t);
-uint32_t cellDataBufferSize = Xres * Yres * sizeof(cellData);
-uint32_t initialData[2*Xres * Yres];
+const uint32_t Xres = 32 * 32*3;
+const uint32_t Yres = 32 * 32*3;
+uint32_t bufferSize = Xres * Yres * sizeof(uint32_t);
+uint32_t initialData[Xres * Yres];
 
 uint32_t offsets[2][2] = {
 	{0, Xres * Yres * sizeof(uint32_t)},
@@ -172,7 +136,6 @@ void initCellstates() {
 	{
 		for (size_t y = 0; y < Yres; y++)
 		{
-			initialData[(y * Xres + x)*2 + 0] = distribution(randomEngine) * 15 + distribution(randomEngine);
 			/*if (x % 16 == 8) {
 				initialData[y * Xres + x] = 13;
 			}
@@ -200,7 +163,7 @@ void initCellstates() {
 			}
 
 			if (x == 0 || y == 0 || y == 1 || x == 1 ) {
-				initialData[(y * Xres + x)*2 + 0] = 13;
+				initialData[y * Xres + x] = 13;
 			}
 			//initialData[y * Xres + x] = 0;
 			//initialData[y * Xres + x] = distribution(randomEngine)*10;
@@ -289,7 +252,7 @@ void initCellstates() {
 		for (size_t i = 0; i < ARRAY_COUNT(cellStateBuffers); i++)
 		{
 
-			uploadDataToBuffer(context, &cellStateBuffers[i], initialData, cellStateBufferSize);
+			uploadDataToBuffer(context, &cellStateBuffers[i], initialData, Xres* Yres * sizeof(uint32_t));
 			//ToDo: uploadDataToBuffer(context, &cellStateBuffers[i], initialData, Xres* Yres * sizeof(cellData));
 			//ToDo: uploadDataToBuffer(context, &cellStateBuffers[i], initialData, 1000000*sizeof(calcData));
 			//ToDo: uploadDataToBuffer(context, &cellStateBuffers[i], initialData, sizeof(InputData));
@@ -332,364 +295,46 @@ void initGameLogic() {
 //ToDo 
 void preCalc() {
 
-	{
-		preCalcPipeline = createComputePipeline(context, "../shaders/preCalc_comp.spv", 0, 0, 1, 0, 0, 0, 0, 0, 1, &preCalcBufferInfo, 0, 0);
-
-
-		VkCommandPoolCreateInfo createInfo = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
-		createInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
-		createInfo.queueFamilyIndex = context->computeQueue.familyIndex;
-		VKA(vkCreateCommandPool(context->device, &createInfo, 0, &preCalcCommandPool));
-
-
-		VkCommandBufferAllocateInfo allocateInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
-		allocateInfo.commandPool = preCalcCommandPool;
-		allocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		allocateInfo.commandBufferCount = 1;
-		VKA(vkAllocateCommandBuffers(context->device, &allocateInfo, &preCalcCommandBuffer));
-
-		//assign current compute commandBuffer
-		VkCommandBuffer computeCommandBuffer = preCalcCommandBuffer;
-
-		//create beginInfo
-		VkCommandBufferBeginInfo computeBeginInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
-		computeBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;//assuming it is only used once
-
-		//begin recording
-		vkBeginCommandBuffer(computeCommandBuffer, &computeBeginInfo);
-
-		//Bind Pipeline, current commandBuffer and set the Bind Point
-		vkCmdBindPipeline(computeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, preCalcPipeline.pipeline);
-
-		//Bind the layout and descriptorset
-		vkCmdBindDescriptorSets(computeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, preCalcPipeline.pipelineLayout, 0, 1, &preCalcPipeline.descriptorSets[0], 0, 0);
-
-
-		//dispatch shader
-		//vkCmdDispatch(computeCommandBuffer, Xres, Yres, 1); //assuming Xres*Yres is not exceeding maxWorkgroups of device and dimensions are devisible by localgroups
-		vkCmdDispatch(computeCommandBuffer, (Xres + 31) / 32, (Yres + 31) / 32, 1);
-
-
-		//end recording
-		vkEndCommandBuffer(computeCommandBuffer);
-
-
-		VKA(vkQueueWaitIdle(context->computeQueue.queue));
-
-		VkSubmitInfo computeSubmitInfo = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
-		computeSubmitInfo.commandBufferCount = 1;
-		computeSubmitInfo.pCommandBuffers = &preCalcCommandBuffer;
-		computeSubmitInfo.waitSemaphoreCount = 0;
-		computeSubmitInfo.pWaitSemaphores = 0;
-		//VkPipelineStageFlags waitMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-		computeSubmitInfo.pWaitDstStageMask = 0;
-		computeSubmitInfo.signalSemaphoreCount = 0;
-		computeSubmitInfo.pSignalSemaphores = 0;
-
-		VKA(vkQueueSubmit(context->computeQueue.queue, 1, &computeSubmitInfo, 0));
-		VKA(vkQueueWaitIdle(context->computeQueue.queue));
-
-	}
-
-
-
-	LOG_INFO("a");
-	{
-		std::vector< VkDescriptorBufferInfo> singleBuffers = { preCalcBufferInfo, globalGpuDataBufferInfo, preCalcKernelBufferInfo };
-		std::vector< VkDescriptorBufferInfo>  singleUniforms = {};
-
-		preCalcKernelPipeline = createComputePipeline(context, "../shaders/preCalc_Kernel.spv", 0, 0, 1, 0, 0, 0, 0, 0, singleBuffers.size(), singleBuffers.data(), singleUniforms.size(), singleUniforms.data());
-
-
-		VkCommandPoolCreateInfo createInfo = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
-		createInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
-		createInfo.queueFamilyIndex = context->computeQueue.familyIndex;
-		VKA(vkCreateCommandPool(context->device, &createInfo, 0, &preCalcKernelCommandPool));
-
-
-		VkCommandBufferAllocateInfo allocateInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
-		allocateInfo.commandPool = preCalcKernelCommandPool;
-		allocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		allocateInfo.commandBufferCount = 1;
-		VKA(vkAllocateCommandBuffers(context->device, &allocateInfo, &preCalcKernelCommandBuffer));
-
-		//assign current compute commandBuffer
-		VkCommandBuffer computeCommandBuffer = preCalcKernelCommandBuffer;
-
-		//create beginInfo
-		VkCommandBufferBeginInfo computeBeginInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
-		computeBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;//assuming it is only used once
-
-		//begin recording
-		vkBeginCommandBuffer(computeCommandBuffer, &computeBeginInfo);
-
-		//Bind Pipeline, current commandBuffer and set the Bind Point
-		vkCmdBindPipeline(computeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, preCalcKernelPipeline.pipeline);
-
-		//Bind the layout and descriptorset
-		vkCmdBindDescriptorSets(computeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, preCalcKernelPipeline.pipelineLayout, 0, 1, &preCalcKernelPipeline.descriptorSets[0], 0, 0);
-
-
-		//dispatch shader
-		//vkCmdDispatch(computeCommandBuffer, Xres, Yres, 1); //assuming Xres*Yres is not exceeding maxWorkgroups of device and dimensions are devisible by localgroups
-		vkCmdDispatch(computeCommandBuffer, (Xres + 31) / 32, (Yres + 31) / 32, 1);
-
-
-		//end recording
-		vkEndCommandBuffer(computeCommandBuffer);
-
-
-		VKA(vkQueueWaitIdle(context->computeQueue.queue));
-
-		VkSubmitInfo computeSubmitInfo = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
-		computeSubmitInfo.commandBufferCount = 1;
-		computeSubmitInfo.pCommandBuffers = &preCalcKernelCommandBuffer;
-		computeSubmitInfo.waitSemaphoreCount = 0;
-		computeSubmitInfo.pWaitSemaphores = 0;
-		//VkPipelineStageFlags waitMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-		computeSubmitInfo.pWaitDstStageMask = 0;
-		computeSubmitInfo.signalSemaphoreCount = 0;
-		computeSubmitInfo.pSignalSemaphores = 0;
-
-		VKA(vkQueueSubmit(context->computeQueue.queue, 1, &computeSubmitInfo, 0));
-		VKA(vkQueueWaitIdle(context->computeQueue.queue));
-
-		uploadDataToBuffer(context, &preCalcKernelUniformBuffer, 0, 0, &preCalcKernelBuffer);
-	}
-}
-
-void initComputationBuffers() {
-
-	uint32_t offset = 0;
-	for (uint32_t i = 0; i < ARRAY_COUNT(cellDataBuffers); i++) {
-		cellDataBuffers[i].offset = offset;
-		createBuffer(context, &cellDataBuffers[i], Xres * Yres * sizeof(cellData), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT); //VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-		cellDataBufferInfos[i].buffer = cellDataBuffers[i].buffer;
-		cellDataBufferInfos[i].offset = 0;
-		cellDataBufferInfos[i].range = cellDataBufferSize;
-		offset += cellDataBufferSize;
-	}
-
 	int numberOfPreCalcBuffers = 1;
-	int numberOfPreCalcValues = 1000000;
-	uint32_t preCalcBufferSize = numberOfPreCalcValues * sizeof(calcData);
+	int numberOfPreCalcValues = 1000 * 1000;
 
-	createBuffer(context, &preCalcBuffer, preCalcBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT); //VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-	preCalcBufferInfo.buffer = preCalcBuffer.buffer;
+	//ToDo: preCalcBuffer und preCalcBufferInfo erst zur berechnung und dann zum lesen in die andere Pipeline
+
+	//precalc shader ist ready :)
+	//verwendet 1 buffer ohne pushconstanten
+	uint32_t preCalcBufferSize = numberOfPreCalcValues * sizeof(calcData);
+	
+	createBuffer(context, &preCalcBuffer, numberOfPreCalcValues * sizeof(calcData), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT); //VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+	preCalcBufferInfo.buffer = preCalcBufferInfo.buffer;
 	preCalcBufferInfo.offset = 0;
 	preCalcBufferInfo.range = preCalcBufferSize;
 
+	preCalcPipeline = createComputePipeline(context, "../shaders/preCalc_comp.spv", 0, 0, 0, 0, 0, 0, 1, &preCalcBufferInfo);
 
-	int numberOfPreCalcKernelBuffers = 1;
-	int numberOfPreCalcKernelValues = 10000;
-	uint32_t preCalcKernelBufferSize = numberOfPreCalcKernelValues * sizeof(int[3]);
-
-	createBuffer(context, &preCalcKernelBuffer, preCalcKernelBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-	preCalcKernelBufferInfo.buffer = preCalcKernelBuffer.buffer;
-	preCalcKernelBufferInfo.offset = 0;
-	preCalcKernelBufferInfo.range = preCalcKernelBufferSize;
-
-	createBuffer(context, &preCalcKernelUniformBuffer, preCalcKernelBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);// VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT); //VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-	preCalcKernelUniformBufferInfo.buffer = preCalcKernelUniformBuffer.buffer;
-	preCalcKernelUniformBufferInfo.offset = 0;
-	preCalcKernelUniformBufferInfo.range = preCalcKernelBufferSize;
+	
+	VkCommandPoolCreateInfo createInfo = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
+	createInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+	createInfo.queueFamilyIndex = context->computeQueue.familyIndex;
+	VKA(vkCreateCommandPool(context->device, &createInfo, 0, &preCalcCommandPool));
 	
 
-
-	int numberOfInputBuffers = 1;
-	int numberOfInputValues = 1;
-	uint32_t globalDataBufferSize = numberOfInputValues * sizeof(InputData);
-
-	createBuffer(context, &globalGpuDataBuffer, globalDataBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT); //VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-	globalGpuDataBufferInfo.buffer = globalGpuDataBuffer.buffer;
-	globalGpuDataBufferInfo.offset = 0;
-	globalGpuDataBufferInfo.range = globalDataBufferSize;
+	VkCommandBufferAllocateInfo allocateInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+	allocateInfo.commandPool = preCalcCommandPool;
+	allocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	allocateInfo.commandBufferCount = 1;
+	VKA(vkAllocateCommandBuffers(context->device, &allocateInfo, &preCalcCommandBuffer));
 	
-	createBuffer(context, &globalGpuDataUniformBuffer, globalDataBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT); //VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-	globalGpuDataUniformBufferInfo.buffer = globalGpuDataUniformBuffer.buffer;
-	globalGpuDataUniformBufferInfo.offset = 0;
-	globalGpuDataUniformBufferInfo.range = globalDataBufferSize;
-
-	bool aBool = true;
-	do {
-
-		builder->standard_start(
-
-			sensorSetSize,		//SensorMenge --> wieviele Sensorgruppen erstellt werden // max 16 
-			minimumDist,		//minimale Distanz 
-			maximumDist,		//maximale Distanz 
-			maximumNeurons,		//maxSensoren -> aus wieivielen IDs kann ein Sensor bestehen? 
-			clusterSetSize,		//ClusterMenge -> wieviele interprationscluster werden erstellt? //max 6 
-			maximumSensors,		//maxGruppen -> wieviele sensorarten pro InterpretationsCluster möglich? 
-			maximumSpec,		//speziesmenge 
-			maximumClusters,		//maxWertigkeiten wieviele Interpretationscluster pro spezies möglich? 
-			1000,	//maxWish 
-			3000,
-			squareio);	//maxStay 
-
-		aBool = false;
-		for (size_t i = 0; i < builder->SpeziesSet[0]->Brain.size(); i++)
-		{
-			aBool = (builder->SpeziesSet[0]->Brain[i]->wertigkeit < 0) || aBool;
-		}
-
-	} while (aBool);// || builder->maxCombiSum < 400); 
-
-	int AuraSquare = int(builder->square);
-
-	for (size_t i = 0; i < builder->SensorSet.size(); i++)
-	{
-		if (random(0, 100) % 2 == 0) {
-			//builder->SensorSet[i]->updateRange(1, 40, 4, 6); 
-		}
-		std::cout << i << ": \t FIRST:" << builder->SensorSet[i]->firstID << std::endl;
-		std::cout << "  " << " \t SIZE: " << builder->SensorSet[i]->groesse << std::endl;
-		std::cout << "  " << " \t MIN: " << builder->SensorSet[i]->minID << std::endl;
-		std::cout << "  " << " \t MAX: " << builder->SensorSet[i]->maxID << std::endl;
-	}
-
-
-	std::vector<int> rulesDNA = builder->SpeziesSet[0]->DNA;
-	std::vector<int> bodyDNA = builder->SensorGruppenRawData;
-
-	std::vector<int> fullBodyDNA(96, 0);
-	std::vector<int> sensorGruppenNummern(96, 0);
-	std::vector<int> sensorGruppenAnzahl = {1,0,0,0,0,0,0};
-
-	std::cout << "Regeln: " << rulesDNA[0] << ", " << rulesDNA[1] << ", " << rulesDNA[2] << std::endl;
-	std::cout << bodyDNA.size() << std::endl;
-
-	for (size_t i = 0; i < bodyDNA.size(); i++)
-	{
-		fullBodyDNA[i] = bodyDNA[i];
-	}
-
-	std::cout << "mögliche summen: " << builder->maxCombiSum << std::endl;
-
-	for (size_t i = 0; i < builder->SpeziesSet[0]->Brain.size(); i++)
-	{
-		sensorGruppenAnzahl[i] = builder->SpeziesSet[0]->Brain[i]->SensorGruppenIDs.size();
-		std::cout << "Cluster " << i << " sensorgruppen: " << builder->SpeziesSet[0]->Brain[i]->SensorGruppenIDs.size() << std::endl;
-	}
-
-	globalGpuData.square = false;
-	for (int i = 0; i < 3; ++i) {
-		globalGpuData.RulesDNA[i] = rulesDNA[i];
-	}
-	for (int i = 0; i < ARRAY_COUNT(globalGpuData.BodyDNA); ++i) {
-		globalGpuData.BodyDNA[i] = fullBodyDNA[i];
-	}
-	for (int i = 0; i < ARRAY_COUNT(globalGpuData.sensorGruppenAnzahl); ++i) {
-		globalGpuData.sensorGruppenAnzahl[i] = sensorGruppenAnzahl[i];
-	}
-
-	if (builder->maxCombiSum > 100000) {
-		builder->SpeziesSet[0]->updateWishAmount(minWishPercent * (Uint32(builder->maxCombiSum) / 10000), (maxWishPercent + 1) * (Uint32(builder->maxCombiSum) / 10000));
-		builder->SpeziesSet[0]->updateStayAmount(minStayPercent * (Uint32(builder->maxCombiSum) / 10000), (maxStayPercent + 1) * (Uint32(builder->maxCombiSum) / 10000));
-	}
-	else {
-		if (builder->maxCombiSum > 10000) {
-			builder->SpeziesSet[0]->updateWishAmount((float(minWishPercent) / 100) * (Uint32(builder->maxCombiSum) / 100), (float(maxWishPercent + 1) / 100) * (Uint32(builder->maxCombiSum) / 100));
-			builder->SpeziesSet[0]->updateStayAmount((float(minStayPercent) / 100) * (Uint32(builder->maxCombiSum) / 100), (float(maxStayPercent + 1) / 100) * (Uint32(builder->maxCombiSum) / 100));
-		}
-		else {
-			builder->SpeziesSet[0]->updateWishAmount((float(minWishPercent) / 10000) * (int(builder->maxCombiSum)), (float(maxWishPercent + 1) / 10000) * (int(builder->maxCombiSum)));
-			builder->SpeziesSet[0]->updateStayAmount((float(minStayPercent) / 10000) * (int(builder->maxCombiSum)), (float(maxStayPercent + 1) / 10000) * (int(builder->maxCombiSum)));
-		}
-	}
-	std::cout << "wish: " << builder->SpeziesSet[0]->WishAmount << "(" << (100 * 1.0f / (builder->maxCombiSum / (1 + builder->SpeziesSet[0]->WishAmount))) << "%)" << std::endl;
-	std::cout << "stay: " << builder->SpeziesSet[0]->StayAmount << "(" << (10000 * 1.0f / (builder->maxCombiSum / (1 + (builder->SpeziesSet[0]->StayAmount / 100)))) << "%)" << std::endl;
-
-	globalGpuData.Wish = builder->SpeziesSet[0]->WishAmount;
-	globalGpuData.Stay = builder->SpeziesSet[0]->StayAmount;
-
-
-	for (size_t i = 0; i < builder->SpeziesSet[0]->Brain.size(); i++)
-	{
-
-		for (size_t j = 0; j < builder->SpeziesSet[0]->Brain[i]->SensorGruppenIDs.size(); j++)
-		{
-			sensorGruppenNummern[16 * i + j] = builder->SpeziesSet[0]->Brain[i]->SensorGruppenIDs[j];
-		}
-	}
-
-
-	for (int i = 0; i < ARRAY_COUNT(globalGpuData.SensorGruppenIDs); ++i) {
-		globalGpuData.SensorGruppenIDs[i] = sensorGruppenNummern[i];
-	}
 	
-	globalGpuData.anzahlCluster = builder->SpeziesSet[0]->Brain.size();
-
-	for (size_t i = 0; i < builder->SpeziesSet[0]->Brain.size(); i++)
-	{
-		globalGpuData.Wertigkeiten[i] = builder->SpeziesSet[0]->Brain[i]->wertigkeit;
-		std::cout << "Cluster " << i << " Wert: " << globalGpuData.Wertigkeiten[i] << std::endl;
-	}
-
-	globalGpuData.maxCombiSum = builder->maxCombiSum;
-
-	globalGpuData.Xres = Xres;
-	globalGpuData.Yres = Yres;
-
-	globalGpuData.thisSpecies = 1;
-	
-	globalGpuData.stateGroups = 10; // stateMod
-	globalGpuData.sumTest = 1;
-	globalGpuData.testint = 1;
-	std::vector<int> DelayValues(18, 0);
-	DelayValues[1] = 1;
-	
-	for (size_t i = 0; i < ARRAY_COUNT(globalGpuData.speciesRetardValues); i++)
-	{
-		globalGpuData.speciesRetardValues[i] = DelayValues[i];
-	} 
-
-	std::vector<int> ThreshValues(18, 0);
-	ThreshValues[0] = 40000;
-	ThreshValues[1] = 0;
-	ThreshValues[2] = 60000;
-
-	for (size_t i = 0; i < ARRAY_COUNT(globalGpuData.speciesThresh); i++)
-	{
-		globalGpuData.speciesThresh[i] = ThreshValues[i];
-	}
-
-
-	std::vector<int> speciesAcc(18, 0);
-	speciesAcc[0] = -2000;
-	speciesAcc[1] = 0;
-	speciesAcc[2] = 2000;
-
-	for (size_t i = 0; i < ARRAY_COUNT(globalGpuData.speciesAcc); i++)
-	{
-		globalGpuData.speciesAcc[i] = speciesAcc[i];
-	}
-	
-	globalGpuData.factorPart = 0.0f;
-
-
-	uploadDataToBuffer(context, &globalGpuDataBuffer, (void*)&globalGpuData, sizeof(InputData)); // works
-	uploadDataToBuffer(context, &globalGpuDataUniformBuffer, (void*)&globalGpuData, sizeof(InputData)); // does not work
-
-	LOG_INFO("wish:", globalGpuData.Wish);
-
-	//uploadDataToBuffer(context, &globalGpuDataUniformBuffer, 0, 0, &globalGpuDataBuffer);
-	//uploadDataToBuffer(context, &globalGpuDataUniformBuffer, (void*)&globalGpuData, sizeof(InputData), &globalGpuDataBuffer);
-	preCalc();
-
-	std::cout << "what" << std::endl;
 }
 
 void initCompute() {
 
-	initComputationBuffers();
 	
+	PushData pushData;
+
 	//ToDo: an bufferinfos die neuen Buffer anhängen. DescriptorSets bleibt also gleich aber DescriptorSetSize wird erweitert. 
 	//ToDo: 
-	std::vector< VkDescriptorBufferInfo> singleBuffers = { preCalcBufferInfo, /*globalGpuDataBufferInfo*/};
-	std::vector< VkDescriptorBufferInfo>  singleUniforms = {  preCalcKernelUniformBufferInfo, globalGpuDataUniformBufferInfo };
-
-	computePipeline = createComputePipeline(context, "../shaders/cellSimulation_comp.spv", cellStateBufferInfos, cellDataBufferInfos, FRAMES_IN_FLIGHT, computeDescriptorSetSize,2, sizeof(PushData), 0, 0, singleBuffers.size(), singleBuffers.data(), singleUniforms.size(), singleUniforms.data());
+	computePipeline = createComputePipeline(context, "../shaders/gameOfLife_comp.spv", bufferInfos, FRAMES_IN_FLIGHT, computeDescriptorSetSize, sizeof(PushData), 0, 0, 0, 0);
 
 	for (uint32_t i = 0; i < ARRAY_COUNT(computeCommandPools); ++i) {
 		VkCommandPoolCreateInfo createInfo = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
@@ -721,7 +366,7 @@ void initApplication(SDL_Window* window) {
 		enabledInstanceExtensions[instanceExtensionCount++] = additionalInstanceExtensions[i];
 	}
 
-	const char* enabledDeviceExtensions[]{ VK_KHR_SWAPCHAIN_EXTENSION_NAME  };
+	const char* enabledDeviceExtensions[]{ VK_KHR_SWAPCHAIN_EXTENSION_NAME };
 	context = initVulkan(instanceExtensionCount, enabledInstanceExtensions, ARRAY_COUNT(enabledDeviceExtensions), enabledDeviceExtensions);
 
 	SDL_Vulkan_CreateSurface(window, context->instance, &surface);
@@ -733,14 +378,12 @@ void initApplication(SDL_Window* window) {
 	uint32_t offset = 0;
 	for (uint32_t i = 0; i < ARRAY_COUNT(cellStateBuffers); i++) {
 		cellStateBuffers[i].offset = offset;
-		createBuffer(context, &cellStateBuffers[i], cellStateBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT); //VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-		cellStateBufferInfos[i].buffer = cellStateBuffers[i].buffer;
-		cellStateBufferInfos[i].offset = 0;
-		cellStateBufferInfos[i].range = cellStateBufferSize;
-		offset += cellStateBufferSize;
+		createBuffer(context, &cellStateBuffers[i], Xres * Yres * sizeof(uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT); //VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+		bufferInfos[i].buffer = cellStateBuffers[i].buffer;
+		bufferInfos[i].offset = 0;
+		bufferInfos[i].range = bufferSize;
+		offset += bufferSize;
 	}
-
-
 	
 	VkVertexInputAttributeDescription vertexAttributeDescriptions[2] = {};
 	vertexAttributeDescriptions[0].binding = 0;
@@ -755,7 +398,7 @@ void initApplication(SDL_Window* window) {
 	vertexInputBinding.binding = 0;
 	vertexInputBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 	vertexInputBinding.stride = sizeof(float) * 5;
-	graphicsPipeline = createGraphicsPipeline(context, "../shaders/readBuffer_vert.spv", "../shaders/readBuffer_frag.spv", renderPass, swapchain.width, swapchain.height, vertexAttributeDescriptions, ARRAY_COUNT(vertexAttributeDescriptions), &vertexInputBinding, computeDescriptorSetSize, FRAMES_IN_FLIGHT, sizeof(PushData), cellStateBufferInfos);
+	graphicsPipeline = createGraphicsPipeline(context, "../shaders/readBuffer_vert.spv", "../shaders/readBuffer_frag.spv", renderPass, swapchain.width, swapchain.height, vertexAttributeDescriptions, ARRAY_COUNT(vertexAttributeDescriptions), &vertexInputBinding, computeDescriptorSetSize, FRAMES_IN_FLIGHT, sizeof(PushData), bufferInfos);
 
 	for(uint32_t i = 0; i < ARRAY_COUNT(fencesCompute); ++i) {
 		VkFenceCreateInfo createInfo = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
@@ -947,10 +590,8 @@ void renderApplication() {
 	//Bind Pipeline, current commandBuffer and set the Bind Point
 	vkCmdBindPipeline(computeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline.pipeline);
 
-	VkDescriptorSet a[2] = { computePipeline.descriptorSets[frameIndex], computePipeline.uniformsDescriptorSets[frameIndex] };
-
 	//Bind the layout and descriptorset
-	vkCmdBindDescriptorSets(computeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline.pipelineLayout, 0, 2, a, 0, 0);
+	vkCmdBindDescriptorSets(computeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline.pipelineLayout, 0, 1, &computePipeline.descriptorSets[frameIndex], 0, 0);
 
 	PushData push = { Xres, Yres };
 	//push Constants to compute shader
@@ -1060,22 +701,14 @@ void renderApplication() {
 void shutdownApplication() {
 	VKA(vkDeviceWaitIdle(context->device));	
 
-	/*
 
-	*/
 	destroyBuffer(context, &vertexBuffer);
 	destroyBuffer(context, &indexBuffer);
 	destroyBuffer(context, &initialCellStateBuffer);
-	destroyBuffer(context, &globalGpuDataBuffer);
-	destroyBuffer(context, &globalGpuDataUniformBuffer);
-	destroyBuffer(context, &preCalcBuffer);
-	destroyBuffer(context, &preCalcKernelBuffer);
-	destroyBuffer(context, &preCalcKernelUniformBuffer);
 
 	for (size_t i = 0; i < ARRAY_COUNT(cellStateBuffers); i++)
 	{
 		destroyBuffer(context, &cellStateBuffers[i]);
-		destroyBuffer(context, &cellDataBuffers[i]);
 	}
 
 
@@ -1094,16 +727,10 @@ void shutdownApplication() {
 		VK(vkDestroyCommandPool(context->device, commandPools[i], 0));
 		VK(vkDestroyCommandPool(context->device, computeCommandPools[i], 0));
 	}
-
-
 	VK(vkDestroyCommandPool(context->device, initialCellStateCommandBufferPool, 0));
-	VK(vkDestroyCommandPool(context->device, preCalcCommandPool, 0));
-	VK(vkDestroyCommandPool(context->device, preCalcKernelCommandPool, 0));
 
 	destroyGraphicsPipeline(context, &graphicsPipeline);
 	destroyComputePipeline(context, &computePipeline);
-	destroyComputePipeline(context, &preCalcPipeline);
-	destroyComputePipeline(context, &preCalcKernelPipeline);
 
 	for (uint32_t i = 0; i < framebuffers.size(); ++i) {
 		VK(vkDestroyFramebuffer(context->device, framebuffers[i], 0));
@@ -1184,29 +811,3 @@ int main() {
 	
 	return 0;
 }
-
-
-
-/*
-do {
-						builder->standard_start(
-							sensorSetSize,		//SensorMenge --> wieviele Sensorgruppen erstellt werden // max 16
-							minimumDist,		//minimale Distanz
-							maximumDist,		//maximale Distanz
-							maximumNeurons,		//maxSensoren -> aus wieivielen IDs kann ein Sensor bestehen?
-							clusterSetSize,		//ClusterMenge -> wieviele interprationscluster werden erstellt? //max 6
-							maximumSensors,		//maxGruppen -> wieviele sensorarten pro InterpretationsCluster möglich?
-							maximumSpec,		//speziesmenge
-							maximumClusters,		//maxWertigkeiten wieviele Interpretationscluster pro spezies möglich?
-							1000,	//maxWish
-							3000,
-							squareio);	//maxStay
-
-						aBool = false;
-						for (size_t i = 0; i < builder->SpeziesSet[0]->Brain.size(); i++)
-						{
-							aBool = (builder->SpeziesSet[0]->Brain[i]->wertigkeit < 0) || aBool;
-						}
-
-					} while (aBool);// || builder->maxCombiSum < 400);
-*/

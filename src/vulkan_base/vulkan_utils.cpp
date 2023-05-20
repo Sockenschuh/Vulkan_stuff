@@ -45,7 +45,7 @@ void createBuffer(VulkanContext* context, VulkanBuffer* buffer, uint64_t size, V
 	VKA(vkBindBufferMemory(context->device, buffer->buffer, buffer->memory, 0));
 }
 
-void uploadDataToBuffer(VulkanContext* context, VulkanBuffer* buffer, void* data, size_t size) {
+void uploadDataToBuffer(VulkanContext* context, VulkanBuffer* dst_buffer, void* data, size_t size, VulkanBuffer* src_buffer) {
 #if 0
 	void* mapped;
 	VKA(vkMapMemory(context->device, buffer->memory, 0, size, 0, &mapped));
@@ -57,11 +57,23 @@ void uploadDataToBuffer(VulkanContext* context, VulkanBuffer* buffer, void* data
 	VkCommandPool commandPool;
 	VkCommandBuffer commandBuffer;
 	VulkanBuffer stagingBuffer;
-	createBuffer(context, &stagingBuffer, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-	void* mapped;
-	VKA(vkMapMemory(context->device, stagingBuffer.memory, 0, size, 0, &mapped));
-	memcpy(mapped, data, size);
-	VK(vkUnmapMemory(context->device, stagingBuffer.memory));
+
+	if (src_buffer != nullptr) {
+		stagingBuffer = *src_buffer;
+		if (size == 0) {
+			VkMemoryRequirements mem_requirements;
+			vkGetBufferMemoryRequirements(context->device, src_buffer->buffer, &mem_requirements);
+			size = mem_requirements.size;
+		}
+	}
+	else {
+		createBuffer(context, &stagingBuffer, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+		void* mapped;
+		VKA(vkMapMemory(context->device, stagingBuffer.memory, 0, size, 0, &mapped));
+		memcpy(mapped, data, size);
+		VK(vkUnmapMemory(context->device, stagingBuffer.memory));
+	}
+
 	{
 		VkCommandPoolCreateInfo createInfo = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
 		createInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
@@ -81,7 +93,7 @@ void uploadDataToBuffer(VulkanContext* context, VulkanBuffer* buffer, void* data
 	VKA(vkBeginCommandBuffer(commandBuffer, &beginInfo));
 
 	VkBufferCopy region = { 0, 0, size };
-	VK(vkCmdCopyBuffer(commandBuffer, stagingBuffer.buffer, buffer->buffer, 1, &region));
+	VK(vkCmdCopyBuffer(commandBuffer, stagingBuffer.buffer, dst_buffer->buffer, 1, &region));
 
 	VKA(vkEndCommandBuffer(commandBuffer));
 
@@ -92,7 +104,8 @@ void uploadDataToBuffer(VulkanContext* context, VulkanBuffer* buffer, void* data
 	VKA(vkQueueWaitIdle(queue->queue));
 
 	VK(vkDestroyCommandPool(context->device, commandPool, 0));
-	destroyBuffer(context, &stagingBuffer);
+
+	if (src_buffer == nullptr) destroyBuffer(context, &stagingBuffer);
 #endif
 }
 
